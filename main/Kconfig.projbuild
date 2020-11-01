@@ -1,0 +1,29 @@
+menu "WAN Configuration"
+
+    config ESP_WIFI_SSID
+        string "WiFi SSID"
+        default "008"
+        help
+            SSID (network name) to connect.
+
+    config ESP_WIFI_PASSWORD
+        string "WiFi Password"
+        default "hilfigner169"
+        help
+            WiFi password (WPA or WPA2).
+
+    config ESP_MAXIMUM_RETRY
+        int "Maximum retry"
+        default 5
+        help
+            Set the Maximum retry to avoid station reconnecting to the AP unlimited when the AP is really inexistent.
+endmenu
+
+menu "LOAD Configuration"
+
+    config URLFILE
+        string "Remote File Address"
+        default "http://httpbin.org/get"
+        help
+            FILE URL which to will be download.
+endmenu
