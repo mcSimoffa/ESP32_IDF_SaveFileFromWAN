@@ -23,9 +23,15 @@
 #include "http_client.h"
 #include "wifi_connect.h"
 
-#define URL_TO_LOAD				CONFIG_URLFILE
-#define MAX_HTTP_RECV_BUFFER 	512
+#define URL_TO_LOAD						CONFIG_URLFILE
+#define MAX_HTTP_RECV_BUFFER 			512
+#define NOTIFY_TIMEOUT_TICKS			1000
+
+extern BaseType_t store_task_h;
+extern BaseType_t network_task_h;
+
 static const char *TAG = "HTTP_CLIENT";
+
 
 char fileReadBuf[512];
 /* Root cert for howsmyssl.com, taken from howsmyssl_com_root_cert.pem
@@ -90,6 +96,9 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt)
 static void http_stream_read()
 {
 	esp_err_t errcode;
+	int rdlen;
+	BaseType_t retVal;
+	uint32_t store_task_notif;
 	esp_http_client_config_t config =
 	    {
 	        .url = URL_TO_LOAD,
@@ -104,121 +113,51 @@ static void http_stream_read()
 		return;
 	}
 
-	int rdlen = esp_http_client_read (client, fileReadBuf, sizeof(fileReadBuf)-1 );
-	if (rdlen == -1)
+	if (ulTaskNotifyTake(pdFALSE, NOTIFY_TIMEOUT_TICKS) == 0)
 	{
-		ESP_LOGE(TAG, "Client Read error");
+		ESP_LOGE(TAG, "Timeout permitting to http_read");
 		return;
 	}
+	ESP_LOGI(TAG, "Incoming permitting for http_read");
 
-
+	int content_length =  esp_http_client_fetch_headers(client);
+	if (content_length >0 && content_length <= MAX_HTTP_RECV_BUFFER)
+	{
+		rdlen = esp_http_client_read (client, fileReadBuf, sizeof(fileReadBuf)-1 );
+		if (rdlen == -1)
+		{
+			ESP_LOGE(TAG, "Client Read error");
+			return;
+		}
+	}
+	uint32_t notVal = (uint32_t)rdlen;
+	//this is send notification for store_task about: "rdlen bytes is ready for save on SD card"
+	if (xTaskNotify (store_task_h, notVal, eSetValueWithoutOverwrite) == pdFALSE)
+	{
+		ESP_LOGE(TAG, "store_task notify error");
+		return;
+	}
+	esp_http_client_close(client);
+	esp_http_client_cleanup(client);
 }
 
-static void http_rest_with_url(void)
+uint32_t Get_http_data(uint8_t *dst)
 {
-    esp_http_client_config_t config =
-    {
-        .url = URL_TO_LOAD,
-        .event_handler = _http_event_handler,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-
-    // GET
-    esp_err_t err = esp_http_client_perform(client);
-    if (err == ESP_OK)
-    {
-        ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %d",
-                esp_http_client_get_status_code(client),
-                esp_http_client_get_content_length(client));
-    } else
-    {
-        ESP_LOGE(TAG, "HTTP GET request failed: %s", esp_err_to_name(err));
-    }
-
-    // POST
-    const char *post_data = "field1=value1&field2=value2";
-    esp_http_client_set_url(client, "http://httpbin.org/post");
-    esp_http_client_set_method(client, HTTP_METHOD_POST);
-    esp_http_client_set_post_field(client, post_data, strlen(post_data));
-    err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTP POST Status = %d, content_length = %d",
-                esp_http_client_get_status_code(client),
-                esp_http_client_get_content_length(client));
-    } else {
-        ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(err));
-    }
-
-    //PUT
-    esp_http_client_set_url(client, "http://httpbin.org/put");
-    esp_http_client_set_method(client, HTTP_METHOD_PUT);
-    err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTP PUT Status = %d, content_length = %d",
-                esp_http_client_get_status_code(client),
-                esp_http_client_get_content_length(client));
-    } else {
-        ESP_LOGE(TAG, "HTTP PUT request failed: %s", esp_err_to_name(err));
-    }
-
-    //PATCH
-    esp_http_client_set_url(client, "http://httpbin.org/patch");
-    esp_http_client_set_method(client, HTTP_METHOD_PATCH);
-    esp_http_client_set_post_field(client, NULL, 0);
-    err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTP PATCH Status = %d, content_length = %d",
-                esp_http_client_get_status_code(client),
-                esp_http_client_get_content_length(client));
-    } else {
-        ESP_LOGE(TAG, "HTTP PATCH request failed: %s", esp_err_to_name(err));
-    }
-
-    //DELETE
-    esp_http_client_set_url(client, "http://httpbin.org/delete");
-    esp_http_client_set_method(client, HTTP_METHOD_DELETE);
-    err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTP DELETE Status = %d, content_length = %d",
-                esp_http_client_get_status_code(client),
-                esp_http_client_get_content_length(client));
-    } else {
-        ESP_LOGE(TAG, "HTTP DELETE request failed: %s", esp_err_to_name(err));
-    }
-
-    //HEAD
-    esp_http_client_set_url(client, "http://httpbin.org/get");
-    esp_http_client_set_method(client, HTTP_METHOD_HEAD);
-    err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTP HEAD Status = %d, content_length = %d",
-                esp_http_client_get_status_code(client),
-                esp_http_client_get_content_length(client));
-    } else {
-        ESP_LOGE(TAG, "HTTP HEAD request failed: %s", esp_err_to_name(err));
-    }
-
-    esp_http_client_cleanup(client);
+	//wait a new dataarray
+	uint32_t rdlen_notif = ulTaskNotifyTake(pdFALSE, NOTIFY_TIMEOUT_TICKS);	//wait binary
+	ESP_LOGI(TAG, "Incoming notification about %d bytes", rdlen_notif);
+	if (rdlen_notif >0)
+	{
+		memcpy(dst, fileReadBuf, rdlen_notif);
+		//this is send notification for network_task about: "I saved yet this array, you may read still one more"
+		if (xTaskNotify(network_task_h, 1, eSetValueWithoutOverwrite) == pdFALSE)
+		{
+			ESP_LOGE(TAG, "network_task notify error");
+		}
+	}
+	return (rdlen_notif);
 }
 
-static void http_download_chunk(void)
-{
-    esp_http_client_config_t config = {
-        .url = "http://httpbin.org/stream-bytes/8912",
-        .event_handler = _http_event_handler,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    esp_err_t err = esp_http_client_perform(client);
-
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTP chunk encoding Status = %d, content_length = %d",
-                esp_http_client_get_status_code(client),
-                esp_http_client_get_content_length(client));
-    } else {
-        ESP_LOGE(TAG, "Error perform http request %s", esp_err_to_name(err));
-    }
-    esp_http_client_cleanup(client);
-}
 
 static void http_perform_as_stream_reader(void)
 {
@@ -240,7 +179,8 @@ static void http_perform_as_stream_reader(void)
     }
     int content_length =  esp_http_client_fetch_headers(client);
     int total_read_len = 0, read_len;
-    if (total_read_len < content_length && content_length <= MAX_HTTP_RECV_BUFFER) {
+    if (total_read_len < content_length && content_length <= MAX_HTTP_RECV_BUFFER)
+    {
         read_len = esp_http_client_read(client, buffer, content_length);
         if (read_len <= 0) {
             ESP_LOGE(TAG, "Error read data");
@@ -261,21 +201,7 @@ void network_task (void *pvParameters)
 {
 	wifi_init_sta();
 	http_stream_read();
-    http_rest_with_url();
-    //http_rest_with_hostname_path();
-    //http_auth_basic();
-    //http_auth_basic_redirect();
-    //http_auth_digest();
-    //http_relative_redirect();
-    //http_absolute_redirect();
-    //https_with_url();
-    //https_with_hostname_path();
-    //http_redirect_to_https();
-    http_download_chunk();
-    http_perform_as_stream_reader();
-    //https_async();
-    //https_with_invalid_url();
-
+    //http_perform_as_stream_reader();
     ESP_LOGI(TAG, "Application finish");
     while(1)	{}
 }

@@ -31,8 +31,9 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    network_task_h 	= xTaskCreate (&network_task, "network_task", 8192, NULL, 5, NULL);
-    store_task_h 	= xTaskCreate (&store_task, "store_task", 8192, NULL, 5, NULL);
+	network_task_h 	= xTaskCreate (&network_task, "network_task", 8192, NULL, 5, NULL);
+	xTaskNotify(network_task, 1, eSetValueWithOverwrite);	//unblock http_read
+	store_task_h 	= xTaskCreate (&store_task, "store_task", 8192, NULL, 5, NULL);
 
     while(1) {}
 }
