@@ -8,6 +8,8 @@
 #include <string.h>
 #include <sys/unistd.h>
 #include <sys/stat.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -15,7 +17,10 @@
 #include "driver/sdspi_host.h"
 #include "sdmmc_cmd.h"
 
+#include "http_client.h"
+
 static const char *TAG = "SD_CARD";
+uint8_t writeBuf[513];
 
 // This example can use SDMMC and SPI peripherals to communicate with SD card.
 // By default, SDMMC peripheral is used.
@@ -39,6 +44,7 @@ static const char *TAG = "SD_CARD";
 
 void store_task (void *pvParameters)
 {
+	uint32_t getlen = 0;
     ESP_LOGI(TAG, "Initializing SD card");
 
 #ifndef USE_SPI_MODE
@@ -91,39 +97,51 @@ void store_task (void *pvParameters)
     sdmmc_card_t* card;
     esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &card);
 
-    if (ret != ESP_OK)
+    do
     {
-        if (ret == ESP_FAIL)
-        {
-            ESP_LOGE(TAG, "Failed to mount filesystem. "
-                "If you want the card to be formatted, set format_if_mount_failed = true.");
-        }
-        else
+		if (ret != ESP_OK)
+		{
+			if (ret == ESP_FAIL)
 			{
-				ESP_LOGE(TAG, "Failed to initialize the card (%s). "
-					"Make sure SD card lines have pull-up resistors in place.", esp_err_to_name(ret));
+				ESP_LOGE(TAG, "Failed to mount filesystem. \r\nIf you want the card to be formatted, set format_if_mount_failed = true.");
 			}
-        return;
-    }
+			else
+				{
+					ESP_LOGE(TAG, "Failed to initialize the card (%s). \r\nMake sure SD card lines have pull-up resistors in place.", esp_err_to_name(ret));
+				}
+			break;
+		}
 
-    // Card has been initialized, print its properties
-    sdmmc_card_print_info(stdout, card);
+		// Card has been initialized, print its properties
+		sdmmc_card_print_info(stdout, card);
 
-    // Use POSIX and C standard library functions to work with files.
-    // First create a file.
-    ESP_LOGI(TAG, "Opening file");
-    FILE* f = fopen("/sdcard/hello.txt", "w");
-    if (f == NULL)
+		// Use POSIX and C standard library functions to work with files.
+		// First create a file.
+		ESP_LOGI(TAG, "Opening for Write");
+		FILE* f = fopen("/sdcard/hello.txt", "w");
+		if (f == NULL)
+		{
+			ESP_LOGE(TAG, "Failed to open file for writing");
+			break;
+		}
+
+		while ( (getlen = Get_http_data(writeBuf)) > 0)
+		{
+			fwrite(writeBuf, 1, getlen, f);
+			ESP_LOGI(TAG, "write %d bytes", getlen);
+		}
+			//fprintf(f, "Hello %s!\n");
+		fclose(f);
+		ESP_LOGI(TAG, "File written and closed");
+
+		// Unmount partition and disable SDMMC or SPI peripheral
+		esp_vfs_fat_sdmmc_unmount();
+		ESP_LOGI(TAG, "Card unmounted");
+    } while (0);
+
+    while (1)
     {
-        ESP_LOGE(TAG, "Failed to open file for writing");
-        return;
+    	vTaskDelay(100);
+    	ESP_LOGI(TAG, " cycle Delay");
     }
-    fprintf(f, "Hello %s!\n", card->cid.name);
-    fclose(f);
-    ESP_LOGI(TAG, "File written");
-
-    // Unmount partition and disable SDMMC or SPI peripheral
-    esp_vfs_fat_sdmmc_unmount();
-    ESP_LOGI(TAG, "Card unmounted");
-    while (1) {}
 }

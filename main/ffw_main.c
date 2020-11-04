@@ -14,11 +14,15 @@
 #include "http_client.h"
 #include "sd_card.h"
 
-BaseType_t network_task_h = 0;
-BaseType_t store_task_h = 0;
+TaskHandle_t network_task_h = NULL;
+TaskHandle_t store_task_h = NULL;
 
+static const char *TAG = "MAIN";
 void app_main(void)
 {
+
+	ESP_LOGI(TAG, "\r\n\nLaunching");
+
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
@@ -30,10 +34,33 @@ void app_main(void)
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    do
+    {
+		if (xTaskCreate (&network_task, "network_task", 8192, NULL, 5, &network_task_h) != pdTRUE)
+		{
+			ESP_LOGE(TAG, "Network task not launched");
+			break;
+		}
 
-	network_task_h 	= xTaskCreate (&network_task, "network_task", 8192, NULL, 5, NULL);
-	xTaskNotify(network_task, 1, eSetValueWithOverwrite);	//unblock http_read
-	store_task_h 	= xTaskCreate (&store_task, "store_task", 8192, NULL, 5, NULL);
+		//unblock http_read
+		if (xTaskNotify(network_task_h, 1, eSetValueWithOverwrite) != pdPASS)
+		{
+			ESP_LOGE(TAG, "Notify for unlock network task not sent");
+			break;
+		}
 
-    while(1) {}
+		if (xTaskCreate (&store_task, "store_task", 8192, NULL, 5, &store_task_h) !=pdPASS)
+		{
+			ESP_LOGE(TAG, "Store task not launched");
+			break;
+		}
+
+		ESP_LOGI(TAG, "Tasks successfully launched");
+    } while (0);
+
+    while(1)
+    {
+    	vTaskDelay(100);
+    	ESP_LOGI(TAG, " cycle Delay");
+    }
 }
