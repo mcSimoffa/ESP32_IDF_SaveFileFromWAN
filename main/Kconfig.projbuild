@@ -19,11 +19,24 @@ menu "WAN Configuration"
             Set the Maximum retry to avoid station reconnecting to the AP unlimited when the AP is really inexistent.
 endmenu
 
-menu "LOAD Configuration"
+menu "APP Configuration"
 
     config URLFILE
         string "Remote File Address"
-        default "http://httpbin.org/get"
+        default "https://www.sgo.fi/Data/RealTime/Kuvat/magrtday.png"
         help
             FILE URL which to will be download.
+            
+     config FILEPATHNAME
+        string "Filename with Path for File"
+        default "/sdcard/sgo.png"
+        help
+            Filename (with path) to save the content downloaded from the URL.
+        
+     config EXCHANG_BUF_SIZE
+        int "Buffer size for from HTTP to SDcard data pass"
+        default 512
+        help
+            Recomended 512-4096.        
+     
 endmenu

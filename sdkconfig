@@ -127,10 +127,12 @@ CONFIG_ESP_MAXIMUM_RETRY=5
 # end of WAN Configuration
 
 #
-# LOAD Configuration
+# APP Configuration
 #
-CONFIG_URLFILE="http://httpbin.org/get"
-# end of LOAD Configuration
+CONFIG_URLFILE="https://www.st.com/resource/en/datasheet/stm32f103c8.pdf"
+CONFIG_FILEPATHNAME="/sdcard/stm32.pdf"
+CONFIG_EXCHANG_BUF_SIZE=4096
+# end of APP Configuration
 
 #
 # Compiler options

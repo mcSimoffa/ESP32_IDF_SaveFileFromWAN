@@ -19,8 +19,11 @@
 
 #include "http_client.h"
 
+#define FILEPATHNAME	CONFIG_FILEPATHNAME
+#define EXCHANGEBUFSIZE	CONFIG_EXCHANG_BUF_SIZE
+
 static const char *TAG = "SD_CARD";
-uint8_t writeBuf[513];
+uint8_t writeBuf[EXCHANGEBUFSIZE + 1];
 
 // This example can use SDMMC and SPI peripherals to communicate with SD card.
 // By default, SDMMC peripheral is used.
@@ -44,7 +47,8 @@ uint8_t writeBuf[513];
 
 void store_task (void *pvParameters)
 {
-	uint32_t getlen = 0;
+	int getlen = 0;
+	eNotyfy_Result nRes;
     ESP_LOGI(TAG, "Initializing SD card");
 
 #ifndef USE_SPI_MODE
@@ -98,17 +102,17 @@ void store_task (void *pvParameters)
     esp_err_t ret = esp_vfs_fat_sdmmc_mount("/sdcard", &host, &slot_config, &mount_config, &card);
 
     do
-    {
+    {	//while (0)
 		if (ret != ESP_OK)
 		{
 			if (ret == ESP_FAIL)
 			{
-				ESP_LOGE(TAG, "Failed to mount filesystem. \r\nIf you want the card to be formatted, set format_if_mount_failed = true.");
+				ESP_LOGE(TAG, "Failed to mount filesystem. If you want the card to be formatted, set format_if_mount_failed = true.");
 			}
 			else
-				{
-					ESP_LOGE(TAG, "Failed to initialize the card (%s). \r\nMake sure SD card lines have pull-up resistors in place.", esp_err_to_name(ret));
-				}
+			{
+				ESP_LOGE(TAG, "Failed to initialize the card (%s). Make sure SD card lines have pull-up resistors in place.", esp_err_to_name(ret));
+			}
 			break;
 		}
 
@@ -118,30 +122,41 @@ void store_task (void *pvParameters)
 		// Use POSIX and C standard library functions to work with files.
 		// First create a file.
 		ESP_LOGI(TAG, "Opening for Write");
-		FILE* f = fopen("/sdcard/hello.txt", "w");
+		FILE* f = fopen(FILEPATHNAME, "w");
 		if (f == NULL)
 		{
 			ESP_LOGE(TAG, "Failed to open file for writing");
 			break;
 		}
 
-		while ( (getlen = Get_http_data(writeBuf)) > 0)
+		//cycle for part by part file save
+		do
 		{
-			fwrite(writeBuf, 1, getlen, f);
-			ESP_LOGI(TAG, "write %d bytes", getlen);
-		}
-			//fprintf(f, "Hello %s!\n");
-		fclose(f);
-		ESP_LOGI(TAG, "File written and closed");
+			nRes = Get_http_data(writeBuf, &getlen);
+			if (nRes == NOTIFY || nRes == LAST_PACKET_NOTIFY)
+			{
+				fwrite(writeBuf, 1, getlen, f);
+				ESP_LOGI(TAG, "write %d bytes", getlen);
+			}
+		} while (nRes == NOTIFY);
 
-		// Unmount partition and disable SDMMC or SPI peripheral
-		esp_vfs_fat_sdmmc_unmount();
-		ESP_LOGI(TAG, "Card unmounted");
+		fclose(f);
+		if (nRes == LAST_PACKET_NOTIFY)
+			ESP_LOGI(TAG, "File written successful");
+		else
+		{
+			ESP_LOGI(TAG, "File write error and will be deleting");
+			unlink(FILEPATHNAME);
+		}
     } while (0);
+
+	// Unmount partition and disable SDMMC or SPI peripheral
+	esp_vfs_fat_sdmmc_unmount();
+	ESP_LOGI(TAG, "Card unmounted");
 
     while (1)
     {
-    	vTaskDelay(100);
+    	vTaskDelay(500);
     	ESP_LOGI(TAG, " cycle Delay");
     }
 }
